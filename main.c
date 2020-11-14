@@ -105,9 +105,19 @@ int main(int argc, char *argv[])
                 SYS_MUnmap(&sys.mmapped_file);
                 
                 if (valid)
+                {
+                        if (verbose)
+                                SYS_Printf("%s is a valid .spt file\n", filepath);
+                        
                         exit(1);
+                }
                 else
+                {
+                        if (verbose)
+                                SYS_Printf("%s isn't a valid .spt file\n", filepath);
+                        
                         exit(0);
+                }
         }
         
         InspectFile(&sys.mmapped_file, &sys.spt_file);

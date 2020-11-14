@@ -18,7 +18,7 @@ typedef unsigned char   byte;
 
 typedef enum flag_e { FLG_VERBOSE, FLG_VERSION, FLG_VERIFY } flag_t;
 typedef enum error_e {
-        ERR_NULL = 3000,
+        ERR_NULLPTR = 3000,
         ERR_NOFILE,
         ERR_MALLOC,
         ERR_MMAP,

@@ -11,10 +11,6 @@
 
 #include "inspect.h"
 
-//bool    flag_verbose = 0;
-//bool    flag_version = 0;
-//bool    flag_verify = 0;
-
 system_t        sys;
 
 /*
@@ -43,8 +39,8 @@ int SYS_MMap (char *file, mmapped_file_t *ret)
         
         if (!ret || !file || *file == '\0')
         {
-                SetErrno(ERR_NULL);
-                SYS_Error("ERROR %d: supplied null pointer while trying to mmap\n", ERR_NULL);
+                SetErrno(ERR_NULLPTR);
+                SYS_Error("ERROR %d: supplied null pointer while trying to mmap\n", ERR_NULLPTR);
         }
         
         ret->fd = open (file, O_RDONLY);
@@ -129,7 +125,10 @@ bool ValidSpriteFile (mmapped_file_t *file)
         char    *fname;
         
         if (!file || !file->path)
-                return false;
+        {
+                SetErrno(ERR_NULLPTR);
+                SYS_Error("ERROR %d: null pointer when trying to validate .spt file\n", ERR_NULLPTR);
+        }
         
         data = file->data;
         fname = file->path;
@@ -154,8 +153,8 @@ bool InspectFile (mmapped_file_t *src, sptfile_t *ret)
         
         if (!src || !ret)
         {
-                SetErrno(ERR_NULL);
-                SYS_Error("ERROR %d: null pointer while inspecting file\n", ERR_NULL);
+                SetErrno(ERR_NULLPTR);
+                SYS_Error("ERROR %d: null pointer while inspecting file\n", ERR_NULLPTR);
         }
         
         valid = ValidSpriteFile(src);
@@ -280,12 +279,12 @@ void FreeSprite (sptfile_t *spt)
 
 bool DumpFile (sptfile_t *file, FILE *stream)
 {
-        //int     i, x, y;
+        int     i, x, y;
         
         if(!file)
         {
-                SetErrno(ERR_NULL);
-                SYS_Error("ERROR %d: null pointer when trying to dump file\n", ERR_NULL);
+                SetErrno(ERR_NULLPTR);
+                SYS_Error("ERROR %d: null pointer when trying to dump file\n", ERR_NULLPTR);
         }
         
         fprintf (stream, "Filepath:     %s\n", file->path);
@@ -297,32 +296,33 @@ bool DumpFile (sptfile_t *file, FILE *stream)
         fprintf (stream, "Offset:       %d\n", file->offset);
         fprintf (stream, "Size:         %d\n\n", file->size);
         
-        /*
-        fprintf (stream, "Colour Table\n");
-        fprintf (stream, "------------\n\n");
-        
-        for (i=0; i<file->nocolours; i++)
+        if (GetFlag(FLG_VERBOSE))
         {
-                fprintf (stream, "Index:        %d\n", i);
-                fprintf (stream, "      R:      %x\n", file->pallete.data[i].r);
-                fprintf (stream, "      G:      %x\n", file->pallete.data[i].g);
-                fprintf (stream, "      B:      %x\n\n", file->pallete.data[i].b);
-        }
-        
-        fprintf (stream, "Bitmap Data\n");
-        fprintf (stream, "------------\n\n");
-        
-        for (y=0; y<file->height * file->width; y+=file->width)
-        {
-                for (x=0; x<file->width; x++)
+                fprintf (stream, "Colour Table\n");
+                fprintf (stream, "------------\n\n");
+                
+                for (i=0; i<file->nocolours; i++)
                 {
-                        fprintf (stream, "Index:        %d\n", y + x);
-                        fprintf (stream, "      R:      %x\n", file->bmpdata[y + x].r);
-                        fprintf (stream, "      G:      %x\n", file->bmpdata[y + x].g);
-                        fprintf (stream, "      G:      %x\n\n", file->bmpdata[y + x].b);
+                        fprintf (stream, "Index:        %d\n", i);
+                        fprintf (stream, "      R:      %x\n", file->pallete.data[i].r);
+                        fprintf (stream, "      G:      %x\n", file->pallete.data[i].g);
+                        fprintf (stream, "      B:      %x\n\n", file->pallete.data[i].b);
+                }
+                
+                fprintf (stream, "Bitmap Data\n");
+                fprintf (stream, "------------\n\n");
+                
+                for (y=0; y<file->height * file->width; y+=file->width)
+                {
+                        for (x=0; x<file->width; x++)
+                        {
+                                fprintf (stream, "Index:        %d\n", y + x);
+                                fprintf (stream, "      R:      %x\n", file->bmpdata[y + x].r);
+                                fprintf (stream, "      G:      %x\n", file->bmpdata[y + x].g);
+                                fprintf (stream, "      G:      %x\n\n", file->bmpdata[y + x].b);
+                        }
                 }
         }
-         */
         return true;
 }
 
@@ -386,7 +386,7 @@ bool SetErrno (error_t errno)
         {
                 case ERR_MALLOC:
                 case ERR_MMAP:
-                case ERR_NULL:
+                case ERR_NULLPTR:
                 case ERR_OPEN:
                 case ERR_STAT:
                 case ERR_DUPCOL:
