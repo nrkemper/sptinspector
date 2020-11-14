@@ -11,16 +11,23 @@
 
 #include "inspect.h"
 
+//bool    flag_verbose = 0;
+//bool    flag_version = 0;
+//bool    flag_verify = 0;
+
+system_t        sys;
+
 /*
         System Dependent Functions
 */
-
 #if defined (__inspctLinux) || defined (__inspctMacOSX)
 
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <unistd.h>
 
+//FIXME: make console???
 void SYS_Printf (char *str, ...)
 {
         va_list         args;
@@ -30,28 +37,27 @@ void SYS_Printf (char *str, ...)
         va_end (args);
 }
 
-bool SYS_MMap (char *file, mmapped_file_t *ret)
+int SYS_MMap (char *file, mmapped_file_t *ret)
 {
         struct stat     sb;
         
         if (!ret || !file || *file == '\0')
-                return false;
-
+        {
+                SetErrno(ERR_NULL);
+                SYS_Error("ERROR %d: supplied null pointer while trying to mmap\n", ERR_NULL);
+        }
+        
         ret->fd = open (file, O_RDONLY);
         if (ret->fd == -1)
         {
-                SYS_Printf ("ERROR: unable to open %s\n", file);
-                memset (ret, 0, sizeof (mmapped_file_t));
-                
-                return false;
+                SetErrno(ERR_OPEN);
+                SYS_Error ("ERROR %d: unable to open %s\n", ERR_OPEN, file);
         }
         
         if (stat (file, &sb) == -1)
         {
-                SYS_Printf("ERROR: unable to fstat file %s\n", file);
-                memset (ret, 0, sizeof (mmapped_file_t));
-                
-                return false;
+                SetErrno(ERR_STAT);
+                SYS_Error("ERROR %d: unable to fstat file %s\n", ERR_STAT, file);
         }
         
         ret->size = sb.st_size;
@@ -59,23 +65,19 @@ bool SYS_MMap (char *file, mmapped_file_t *ret)
         ret->data = mmap(NULL, ret->size, PROT_READ, MAP_PRIVATE, ret->fd, 0);
         if (ret->data == (void *)-1)
         {
-                SYS_Printf("ERROR: unable to map file %s\n", file);
-                memset (ret, 0, sizeof (mmapped_file_t));
-                
-                return false;
+                SetErrno(ERR_MMAP);
+                SYS_Error("ERROR %d: unable to map file %s\n", ERR_MMAP, file);
         }
         
-        ret->fname = (char *)malloc (strlen (file) + 1);
-        if (!ret->fname)
+        ret->path = (char *)malloc (strlen (file) + 1);
+        if (!ret->path)
         {
-                SYS_Printf("ERROR: unable to allocate memory for file name %s\n", file);
-                munmap (ret->data, ret->size);
-                memset (ret, 0, sizeof (mmapped_file_t));
-                
-                return false;
+                SetErrno(ERR_MALLOC);
+                SYS_Error("ERROR %d: unable to allocate memory for file name %s\n", ERR_MALLOC, file);
         }
         
-        strcpy (ret->fname, file);
+        strcpy (ret->path, file);
+        close(ret->fd);
         
         return true;
 }
@@ -83,10 +85,29 @@ bool SYS_MMap (char *file, mmapped_file_t *ret)
 bool SYS_MUnmap (mmapped_file_t *file)
 {
         munmap (file->data, file->size);
-        free(file->fname);
+        free(file->path);
         memset(file, 0, sizeof (mmapped_file_t));
         
         return true;
+}
+
+void SYS_Error (char *str, ...)
+{
+        va_list         args;
+        
+        va_start(args, str);
+        vprintf(str, args);
+        va_end(args);
+        
+        SYS_Shutdown(sys.errno);
+}
+
+void SYS_Shutdown (int exitcode)
+{
+        SYS_MUnmap(&sys.mmapped_file);
+        FreeSprite(&sys.spt_file);
+        
+        exit (sys.errno);
 }
 
 #elif defined (__inspctWindows)
@@ -102,42 +123,58 @@ bool SYS_MUnmap (mmapped_file_t *file)
 /*
         Main Functions
  */
+bool ValidSpriteFile (mmapped_file_t *file)
+{
+        byte    *data;
+        char    *fname;
+        
+        if (!file || !file->path)
+                return false;
+        
+        data = file->data;
+        fname = file->path;
+        
+        if (strcmp(fname + strlen (fname) - 4, ".spt") != 0)
+                return false;
+        
+        if (*data != 'S' ||
+            *(data + 1) != 'P' ||
+            *(data + 2) != 'T')
+                return false;
+        
+        return true;
+}
+
 bool InspectFile (mmapped_file_t *src, sptfile_t *ret)
 {
         byte            *data;
         int             i, x, offset, nbytes;
         colour_t        tmp;
+        bool            valid;
         
         if (!src || !ret)
-                return false;
+        {
+                SetErrno(ERR_NULL);
+                SYS_Error("ERROR %d: null pointer while inspecting file\n", ERR_NULL);
+        }
+        
+        valid = ValidSpriteFile(src);
+        if (!valid)
+        {
+                SetErrno(ERR_INVALIDSPT);
+                SYS_Error("ERROR %d: invalid .spt file.\n", ERR_INVALIDSPT);
+        }
         
         data = src->data;
         
         ret->stamp[0] = *data;
         ret->stamp[1] = *(data + 1);
         ret->stamp[2] = *(data + 2);
-        
-        if (ret->stamp[0] != 'S' || ret->stamp[1] != 'P' || ret->stamp[2] != 'T')
-        {
-                SYS_Printf("ERROR: invalid .spt file.\n");
-                memset(ret, 0, sizeof (sptfile_t));
-                
-                return false;
-        }
-        
         ret->width = *(int *)(data + 3);
         ret->height = *(int *)(data + 7);
         ret->nocolours = *(int *)(data + 11);
         ret->offset = *(int *)(data + 15);
         ret->size = *(int *)(data + 19);
-        
-        printf ("In the thing\n");
-        printf ("Stamp:         %c%c%c\n", ret->stamp[0], ret->stamp[1], ret->stamp[2]);
-        printf ("Width:         %d\n", ret->width);
-        printf ("Height:        %d\n", ret->height);
-        printf ("No. Colours:   %d\n", ret->nocolours);
-        printf ("Offset:        %d\n", ret->offset);
-        printf ("Size:          %d\n", ret->size);
         
         if (!LittleEndian ())
         {
@@ -151,10 +188,8 @@ bool InspectFile (mmapped_file_t *src, sptfile_t *ret)
         ret->pallete.data = (palette_entry_t *)malloc (sizeof (palette_entry_t) *                                                               ret->nocolours);
         if (!ret->pallete.data)
         {
-                SYS_Printf("ERROR: unable to allocate memory for the palette\n");
-                memset (ret, 0, sizeof (sptfile_t));
-                
-                return false;
+                SetErrno(ERR_MALLOC);
+                SYS_Error("ERROR %d: unable to allocate memory for the palette\n", ERR_MALLOC);
         }
         
         //get colour table
@@ -180,11 +215,8 @@ bool InspectFile (mmapped_file_t *src, sptfile_t *ret)
                 
                 if (P_ColourExists(&ret->pallete, &tmp))
                 {//duplicate colour in palette
-                        SYS_Printf("ERROR: colour exists in palette\n");
-                        free (ret->pallete.data);
-                        memset(ret, 0, sizeof(sptfile_t));
-                        
-                        return false;
+                        SetErrno(ERR_DUPCOL);
+                        SYS_Error("ERROR %d: colour (%c, %c, %c) exists in palette\n", ERR_DUPCOL, tmp.r, tmp.g, tmp.b);
                 }
                 
                 P_AddColour(&ret->pallete, &tmp);
@@ -197,10 +229,8 @@ bool InspectFile (mmapped_file_t *src, sptfile_t *ret)
         ret->bmpdata = (colour_t *)malloc (nbytes * sizeof (colour_t));
         if (!ret->bmpdata)
         {
-                SYS_Printf("ERROR: unable to allocate memory for bitmap data\n");
-                FreeSprite(ret);
-                
-                return false;
+                SetErrno(ERR_MALLOC);
+                SYS_Error("ERROR %d: unable to allocate memory for bitmap data\n", ERR_MALLOC);
         }
         
         for (i=0, x=0; i<nbytes; i+=3, x++)
@@ -220,16 +250,14 @@ bool InspectFile (mmapped_file_t *src, sptfile_t *ret)
                 ret->bmpdata[x].b = *(data + offset + i + 2);
         }
         
-        ret->path = (char *)malloc (strlen(src->fname) + 1);
+        ret->path = (char *)malloc (strlen(src->path) + 1);
         if (!ret->path)
         {
-                SYS_Printf("ERROR: unable to allocate memory for name\n");
-                FreeSprite(ret);
-                
-                return false;
+                SetErrno(ERR_MALLOC);
+                SYS_Error("ERROR %d: unable to allocate memory for name\n", ERR_MALLOC);
         }
         
-        strcpy (ret->path, src->fname);
+        strcpy (ret->path, src->path);
         return true;
 }
 
@@ -244,12 +272,21 @@ void FreeSprite (sptfile_t *spt)
         if (spt->pallete.data)
                 free (spt->pallete.data);
         
+        if (spt->path)
+                free (spt->path);
+        
         memset(spt, 0, sizeof (sptfile_t));
 }
 
 bool DumpFile (sptfile_t *file, FILE *stream)
 {
-        int     i, x, y;
+        //int     i, x, y;
+        
+        if(!file)
+        {
+                SetErrno(ERR_NULL);
+                SYS_Error("ERROR %d: null pointer when trying to dump file\n", ERR_NULL);
+        }
         
         fprintf (stream, "Filepath:     %s\n", file->path);
         fprintf (stream, "Stamp:        %c%c%c\n", file->stamp[0], file->stamp[1],                                                      file->stamp[2]);
@@ -260,6 +297,7 @@ bool DumpFile (sptfile_t *file, FILE *stream)
         fprintf (stream, "Offset:       %d\n", file->offset);
         fprintf (stream, "Size:         %d\n\n", file->size);
         
+        /*
         fprintf (stream, "Colour Table\n");
         fprintf (stream, "------------\n\n");
         
@@ -268,12 +306,12 @@ bool DumpFile (sptfile_t *file, FILE *stream)
                 fprintf (stream, "Index:        %d\n", i);
                 fprintf (stream, "      R:      %x\n", file->pallete.data[i].r);
                 fprintf (stream, "      G:      %x\n", file->pallete.data[i].g);
-                fprintf (stream, "      B:      %x\n", file->pallete.data[i].b);
+                fprintf (stream, "      B:      %x\n\n", file->pallete.data[i].b);
         }
-        fprintf (stream, "\n");
         
         fprintf (stream, "Bitmap Data\n");
         fprintf (stream, "------------\n\n");
+        
         for (y=0; y<file->height * file->width; y+=file->width)
         {
                 for (x=0; x<file->width; x++)
@@ -284,7 +322,89 @@ bool DumpFile (sptfile_t *file, FILE *stream)
                         fprintf (stream, "      G:      %x\n\n", file->bmpdata[y + x].b);
                 }
         }
+         */
         return true;
+}
+
+void PrintVersionNumber (void)
+{
+        SYS_Printf("---Version %.2f---\n", VERSION);
+}
+
+/*
+        Flag Functions
+ */
+void SetFlag (int flag, bool val)
+{
+        switch (flag)
+        {
+                case FLG_VERSION:
+                        sys.flg_version = val;
+                        break;
+                        
+                case FLG_VERBOSE:
+                        sys.flg_verbose = val;
+                        break;
+                        
+                case FLG_VERIFY:
+                        sys.flg_verify = val;
+                        break;
+                        
+                default:
+                        SYS_Printf("ERROR: invalid flag %d\n", flag);
+                        break;
+        }
+}
+
+bool GetFlag (int flag)
+{
+        switch (flag)
+        {
+                case FLG_VERSION:
+                        return sys.flg_version;
+                        break;
+                
+                case FLG_VERBOSE:
+                        return sys.flg_verbose;
+                        break;
+                
+                case FLG_VERIFY:
+                        return sys.flg_verify;
+                        break;
+                        
+                default:
+                        SYS_Printf("ERROR: inavlid flag %d\n", flag);
+                        return false;
+                        break;
+        }
+}
+
+
+bool SetErrno (error_t errno)
+{
+        switch (errno)
+        {
+                case ERR_MALLOC:
+                case ERR_MMAP:
+                case ERR_NULL:
+                case ERR_OPEN:
+                case ERR_STAT:
+                case ERR_DUPCOL:
+                case ERR_INVALIDSPT:
+                case ERR_NOFILE:
+                        sys.errno = errno;
+                        return true;
+                        break;
+                        
+                default:
+                        return false;
+                        break;
+        }
+}
+
+error_t GetErrno (void)
+{
+        return sys.errno;
 }
 
 /*

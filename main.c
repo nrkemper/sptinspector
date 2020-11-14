@@ -6,34 +6,114 @@
 //
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "inspect.h"
 
-char    filepath[100] = "/Users/nicholaskemp/Desktop/black_white.spt";
+#define MAXFILEPATH     100
 
-bool ParseCommandLine (int argc, const char *argv[])
+char    filepath[MAXFILEPATH] = "";
+
+bool ParseCommandLine (int argc, char *argv[])
 {
+        char    *ptr;
+        int     i;
+        
+        for (i=1; i<argc; )
+        {
+                ptr = argv[i];
+                
+                switch (*ptr)
+                {
+                        case '-':
+                        {
+                                for (ptr++, i++; *ptr; ptr++)
+                                {
+                                        switch (*ptr)
+                                        {
+                                                case 'f':
+                                                case 'F':
+                                                        if (*filepath == '\0')
+                                                                strncpy(filepath, argv[i], MAXFILEPATH);
+                                                        else
+                                                                SYS_Printf("ERROR: filename already supplied. Ignoring %s\n", argv[i]);
+                                                        
+                                                        i++;
+                                                        break;
+                                                        
+                                                case 'g': //verify the file is a .spt file
+                                                        SetFlag(FLG_VERIFY, true);
+                                                        break;
+                                                        
+                                                case 'v': //verbose
+                                                        SetFlag(FLG_VERBOSE, true);
+                                                        break;
+                                                        
+                                                case 'V': //version
+                                                        SetFlag(FLG_VERSION, true);
+                                                        break;
+                                        }
+                                                
+                                }
+                        }
+                                break;
+                                
+                        default:
+                                
+                                if (*filepath == '\0')
+                                        strncpy(filepath, argv[i], MAXFILEPATH);
+                                else
+                                        SYS_Printf("ERROR: filepath already supplied. Ignoring %s\n", argv[i]);
+                                
+                                i++;
+                                
+                                break;
+                }
+        }
         return true;
 }
 
-int main(int argc, const char * argv[])
+int main(int argc, char *argv[])
 {
-        mmapped_file_t  mapped_file;
-        sptfile_t       sprite_file;
-        memset (&sprite_file, 0, sizeof (sptfile_t));
-        ParseCommandLine(argc, argv);
-        if (!SYS_MMap(filepath, &mapped_file))
-                return -1;
+        bool            version, verbose, verify, valid;
         
-        if (!InspectFile(&mapped_file, &sprite_file))
+        memset(&sys, 0, sizeof(system_t));
+        
+        ParseCommandLine(argc, argv);
+        
+        version = GetFlag(FLG_VERSION);
+        verbose = GetFlag(FLG_VERBOSE);
+        verify = GetFlag(FLG_VERIFY);
+        
+        if (version)
         {
-                SYS_MUnmap(&mapped_file);
-                return -1;
+                PrintVersionNumber();
+                exit(1);
         }
         
-        DumpFile(&sprite_file, stdout);
-        FreeSprite(&sprite_file);
-        SYS_MUnmap(&mapped_file);
+        if (*filepath == '\0')
+        {
+                SetErrno(ERR_NOFILE);
+                SYS_Error("ERROR %d: did not supply a file.\n", ERR_NOFILE);
+        }
+        
+        SYS_MMap(filepath, &sys.mmapped_file);
+        
+        if (verify)
+        {
+                valid = ValidSpriteFile(&sys.mmapped_file);
+                SYS_MUnmap(&sys.mmapped_file);
+                
+                if (valid)
+                        exit(1);
+                else
+                        exit(0);
+        }
+        
+        InspectFile(&sys.mmapped_file, &sys.spt_file);
+        DumpFile(&sys.spt_file, stdout);
+        
+        SYS_Shutdown(0);
         
         return 0;
 }
